@@ -300,23 +300,33 @@ def getObjectPoint(pointsRight,epl,camWorldCenterLeft,camWorldCenterRight,camLef
         
 
 def drawPointObject(point):
+    """
+    Dessine un nuage de points 3D à partir des coordonnées données.
+    """
     figure = plt.figure()
-    ax = Axes3D(figure)
-    
-    ax.scatter3D(point[0,:],point[1,:],point[2,:],s = 100, c='black',marker='x')     
-        
-    ax.view_init(-90,-70)
-    plt.axis('off')
+    ax = figure.add_subplot(111, projection='3d')  # Crée un axe 3D
+
+    # Dessine les points en 3D
+    ax.scatter3D(point[0, :], point[1, :], point[2, :], s=100, c='black', marker='x')
+
+    # Ajuste l'angle de vue
+    ax.view_init(-90, -70)
+    plt.axis('off')  # Supprime les axes
     plt.show()
+
     
+
 
 def drawSurfaceObject(point):
+    """
+    Dessine un objet 3D à partir des points donnés.
+    """
     figure = plt.figure()
-    ax = Axes3D(figure)
-    ax.plot_trisurf(point[0,:],point[1,:],point[2,:])     
+    ax = figure.add_subplot(111, projection='3d')  # Ajout d'un axe 3D
+    ax.plot_trisurf(point[0, :], point[1, :], point[2, :])  # Surface 3D
 
-    ax.view_init(-95,-50)
-    plt.axis('off')
+    ax.view_init(-95, -50)  # Ajuste l'angle de vue
+    plt.axis('off')  # Supprime les axes
     plt.show()
     
     
