@@ -10,7 +10,7 @@ from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from PIL import Image
 import os
 from IPython.display import Image as pythImage, display
-
+import imageio
 
 
 
@@ -38,11 +38,10 @@ def crossMat(v):
     return np.array([[0,-v[2],v[1]] , [v[2],0,-v[0]] , [-v[1],v[0],0]])
 
 
-def matFondamental(camLeft,centerRight,camRight):
-        # pseudo inverse de la matrice camRight, qu'on multiplie par camLeft (= MatriceIntrinsèque @ MatriceRota)
-        # qu'on multiplie ensuite par (camLeft @centerRight) qui représente ...
-        # Et on fait finalement le cross product (produit vectoriel) de la matrice colonne resultat
-        return np.array(crossMat(camLeft @ centerRight) @ camLeft @ np.linalg.pinv(camRight))
+def matFondamental(camLeft,camCenterLeft,camRight):
+        # VALIDE
+        # formule de l'énoncé pour trouver la matrice fondamentale
+        return np.array(crossMat(camRight @ camCenterLeft) @ camRight @ np.linalg.pinv(camLeft))
 
 
 def getImgLine(fname):              
@@ -102,28 +101,44 @@ def drawAvgPoint(img, EplLeft):
 
 
 
-def drawEpl(img, EplRight):
+def drawEpl(img, EplRight, spacing=10):
     """
-    Ajoute des lignes épipolaires directement sur l'image en fonction des coefficients fournis.
+    Ajoute des lignes épipolaires directement sur l'image en fonction des coefficients fournis,
+    avec un espacement défini entre les lignes pour éviter qu'il y en ait trop.
     :param img: Image sur laquelle dessiner les lignes.
-    :param EplRight: Matrice contenant les coefficients des lignes épipolaires.
+    :param EplRight: Matrice contenant les coefficients des lignes épipolaires (a, b, c).
+    :param spacing: Espacement entre les lignes épipolaires à dessiner.
     """
-    coef, length = EplRight.shape
-    for i in range(0, length, 10):  # Espacement des lignes
-        # Calculer les points de la ligne
-        y1 = int(lineY(EplRight[:, i], 0))       # Point à x=0
-        y2 = int(lineY(EplRight[:, i], img.shape[1] - 1))  # Point à x=largeur de l'image
+    # Dimensions de l'image
+    xmax = img.shape[1]  # Largeur de l'image
+    ymax = img.shape[0]  # Hauteur de l'image
+    
+    # Dessiner les lignes épipolaires avec l'espacement
+    for i in range(0, EplRight.shape[1], spacing):  # Espacement entre les lignes
+        # Coefficients de la ligne épipolaire
+        a, b, c = EplRight[:, i]
+        
+        # Calcul du premier point d'intersection (yr1) à x=0
+        yr1 = -c / b
+        
+        # Calcul du deuxième point d'intersection (yr2) à x=xmax
+        yr2 = (-xmax * a - c) / b
+        
+        # Clamper les valeurs pour qu'elles soient dans les limites de l'image
+        yr1 = max(0, min(yr1, ymax - 1))
+        yr2 = max(0, min(yr2, ymax - 1))
 
-        # Dessiner la ligne sur l'image
+        # Dessiner la ligne entre (0, yr1) et (xmax, yr2)
         color = (0, 0, 255)  # Couleur rouge (BGR)
         thickness = 2  # Épaisseur de la ligne
-        cv.line(img, (0, y1), (img.shape[1] - 1, y2), color, thickness)
+        cv.line(img, (0, int(yr1)), (xmax - 1, int(yr2)), color, thickness)
 
     return img
 
 
 
-def process_folder(left_folder, right_folder, EplLeft, EplRight, output_gif_path, duration=300):
+
+def process_folder(left_folder, right_folder, EplPointsLeft, EplRight, output_gif_path, duration=300):
     """
     Parcourt un dossier d'images, applique drawAvgPoint et drawEpl sur chaque image, 
     et génère un GIF.
@@ -148,8 +163,8 @@ def process_folder(left_folder, right_folder, EplLeft, EplRight, output_gif_path
         img_right = cv.imread(right_path)
 
         # Appliquer les transformations
-        img_left = drawAvgPoint(img_left, EplLeft[idx][0])
-        img_right = drawEpl(img_right, EplRight[idx][1])
+        img_left = drawAvgPoint(img_left, EplPointsLeft[idx])
+        img_right = drawEpl(img_right, EplRight[idx])
 
         # Combiner les deux images côte à côte
         combined_width = img_left.shape[1] + img_right.shape[1]
@@ -244,36 +259,9 @@ def getIntersection(pointsLeft,pointsRight,camWorldCenterLeft,camWorldCenterRigh
     
     leftStartVec = arrayToVector(camCenterLeft)
     rightStartVec = arrayToVector(camCenterRight)
-    
-    # affichage des lignes reliant centre à point objet
-    
-    '''
-    draw3DLine(camCenterLeft,leftObject)
-    draw3DLine(camCenterRight,rightObject)
-    plt.show()
-    '''
-    
-    # utilisation de mathutils.geometry.intersect_line_line pour trouver l'intersection des lingnes passant par les 2 
-    # points. 
+  
     return pygeo.intersect_line_line(leftStartVec,leftEndVec,rightStartVec,rightEndVec)
 
-
-def draw3DLine(start,end):
-    figure = plt.figure()
-    ax = Axes3D(figure)
-    
-    ax.set_xlabel('X axis')
-    ax.set_ylabel('Y axis')
-    ax.set_zlabel('Z axis')
-    
-    x_start,y_start,z_start = start
-    x_end,y_end,z_end = end
-
-    print("start = ({},{},{})".format(x_start,y_start,z_start))
-    print("end = ({},{},{})\n".format(x_end,y_end,z_end))
-
-    ax.scatter(x_start,y_start,z_start,c='r',marker='o')
-    ax.plot([x_start ,x_end],[y_start,y_end],[z_start,z_end])
 
 
 def getObjectPoint(pointsRight,epl,camWorldCenterLeft,camWorldCenterRight,camLeft,camRight):
@@ -299,119 +287,92 @@ def getObjectPoint(pointsRight,epl,camWorldCenterLeft,camWorldCenterRight,camLef
     return np.array(point)
         
 
-def drawPointObject(point):
+def drawPointObject(point, save_path=None):
     """
-    Dessine un nuage de points 3D à partir des coordonnées données.
+    Dessine un nuage de points 3D à partir des coordonnées données,
+    avec une coloration basée sur la profondeur (coordonnée Z).
     """
     figure = plt.figure()
     ax = figure.add_subplot(111, projection='3d')  # Crée un axe 3D
 
+    # Calcul de la profondeur pour la coloration
+    depth = point[2, :]  # Coordonnée Z des points
+    colors = plt.cm.jet((depth - np.min(depth)) / (np.max(depth) - np.min(depth)))  # Normalisation et application d'une colormap
+
     # Dessine les points en 3D
-    ax.scatter3D(point[0, :], point[1, :], point[2, :], s=100, c='black', marker='x')
+    scatter = ax.scatter3D(point[0, :], point[1, :], point[2, :], s=50, c=colors, marker='o')
 
     # Ajuste l'angle de vue
-    ax.view_init(-90, -70)
-    plt.axis('off')  # Supprime les axes
-    plt.show()
+    ax.view_init(elev=-90, azim=-70)
 
-    
+    # Supprime les axes
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.set_zticks([])
 
-
-def drawSurfaceObject(point):
+    if save_path is not None:
+        plt.savefig(save_path)
+        plt.close()
+    else:
+        plt.axis('off')
+        plt.show()
+        
+def rotatePoints(points, axis='z', angle_deg=180):
     """
-    Dessine un objet 3D à partir des points donnés.
-    """
-    figure = plt.figure()
-    ax = figure.add_subplot(111, projection='3d')  # Ajout d'un axe 3D
-    ax.plot_trisurf(point[0, :], point[1, :], point[2, :])  # Surface 3D
-
-    ax.view_init(-95, -50)  # Ajuste l'angle de vue
-    plt.axis('off')  # Supprime les axes
-    plt.show()
-    
-    
-def pointToJson(point):
-    data = {'x':point[0,:].tolist(),'y':point[1,:].tolist(),'z':point[2,:].tolist()}
-    with open('point.txt','+w') as file:
-        json.dump(data,file)
-
-def calibrate(checkerboard_dims=(7, 7), images_path='./chessboards/*.png', display=True):
-    """
-    Calibrate the camera using chessboard images.
+    Applique une rotation de angle_deg degrés autour de l'axe spécifié ('x', 'y' ou 'z') sur un ensemble de points.
 
     Parameters:
-        checkerboard_dims (tuple): Dimensions of the chessboard (rows, columns).
-        images_path (str): Glob pattern for chessboard images.
-        display (bool): Whether to display detected corners.
+        points (np.ndarray): Tableau de points 3D de forme (3, N).
+        axis (str): Axe de rotation ('x', 'y' ou 'z').
+        angle_deg (float): Angle de rotation en degrés.
 
     Returns:
-        dict: Calibration results including camera matrix, distortion coefficients,
-              rotation vectors, and translation vectors.
+        np.ndarray: Points après la rotation.
     """
-    CHECKERBOARD = checkerboard_dims
-    criteria = (cv.TERM_CRITERIA_EPS + cv.TERM_CRITERIA_MAX_ITER, 30, 0.001)
-
-    objpoints = []
-    imgpoints = []
-
-    # Prepare a single object point grid for the checkerboard
-    objp = np.zeros((1, CHECKERBOARD[0] * CHECKERBOARD[1], 3), np.float32)
-    objp[0, :, :2] = np.mgrid[0:CHECKERBOARD[0], 0:CHECKERBOARD[1]].T.reshape(-1, 2)
-    if images_path == './chessboards/*.png':
-        images = glob.glob(images_path)
+    angle_rad = np.radians(angle_deg)  # Convertir l'angle en radians
+    if axis == 'x':
+        rotation_matrix = np.array([
+            [1, 0, 0],
+            [0, np.cos(angle_rad), -np.sin(angle_rad)],
+            [0, np.sin(angle_rad), np.cos(angle_rad)]
+        ])
+    elif axis == 'y':
+        rotation_matrix = np.array([
+            [np.cos(angle_rad), 0, np.sin(angle_rad)],
+            [0, 1, 0],
+            [-np.sin(angle_rad), 0, np.cos(angle_rad)]
+        ])
+    elif axis == 'z':
+        rotation_matrix = np.array([
+            [np.cos(angle_rad), -np.sin(angle_rad), 0],
+            [np.sin(angle_rad), np.cos(angle_rad), 0],
+            [0, 0, 1]
+        ])
     else:
-        images = images_path
-    for n, fname in enumerate(images):
-        img = cv.imread(fname)
-        if img is None:
-            print(f"Could not load image: {fname}")
-            continue
+        raise ValueError("Axe invalide. Choisissez 'x', 'y' ou 'z'.")
 
-        gray = cv.cvtColor(img, cv.COLOR_BGR2GRAY) if len(img.shape) == 3 else img
+    # Appliquer la rotation à tous les points
+    return np.dot(rotation_matrix, points)
 
-        # Find the chessboard corners
-        ret, corners = cv.findChessboardCorners(
-            gray, CHECKERBOARD,
-            cv.CALIB_CB_ADAPTIVE_THRESH + cv.CALIB_CB_NORMALIZE_IMAGE
-        )
-        if ret:
-            objpoints.append(objp)
-            corners2 = cv.cornerSubPix(gray, corners, (11, 11), (-1, -1), criteria)
-            imgpoints.append(corners2)
+def createGifMonkey(points, num_frames=15, axis='z', angle_step=10, gif_path='rotation.gif'):
+    """
+    Crée un GIF montrant une rotation du nuage de points.
+    """
+    filenames = []
+    for i in range(num_frames):
+        rotated_points = rotatePoints(points, axis=axis, angle_deg=i * angle_step)
+        filename = f'frame_{i:02d}.png'
+        drawPointObject(rotated_points, save_path=filename)
+        filenames.append(filename)
 
-            # Draw and optionally display the corners
-            img = cv.drawChessboardCorners(img, CHECKERBOARD, corners2, ret)
-            if display:
-                scale_percent = 20  # Resize to 20% of the original size
-                width = int(img.shape[1] * scale_percent / 100)
-                height = int(img.shape[0] * scale_percent / 100)
-                dim = (width, height)
-                img_resized = cv.resize(img, dim, interpolation=cv.INTER_AREA)
-                cv.imshow('Detected Corners', img_resized)
-                cv.waitKey(0)
-        else:
-            print(f"No corners detected in image: {fname}")
+    # Créer le GIF avec boucle infinie
+    with imageio.get_writer(gif_path, mode='I', duration=0.1, loop=0) as writer:
+        for filename in filenames:
+            image = imageio.imread(filename)
+            writer.append_data(image)
 
-    cv.destroyAllWindows()
+    # Supprimer les images temporaires
+    for filename in filenames:
+        os.remove(filename)
 
-    # Check if there are enough points for calibration
-    if not objpoints or not imgpoints:
-        print("No valid points were found for calibration. Exiting.")
-        return None
-
-    # Camera calibration
-    ret, mtx, dist, rvecs, tvecs = cv.calibrateCamera(objpoints, imgpoints, gray.shape[::-1], None, None)
-
-    # Display calibration results
-    print("Camera matrix : \n", mtx)
-    print("Distortion coefficients : \n", dist)
-    print("Rotation vectors : \n", rvecs)
-    print("Translation vectors : \n", tvecs)
-
-    return {
-        "ret": ret,
-        "camera_matrix": mtx,
-        "dist_coefficients": dist,
-        "rotation_vectors": rvecs,
-        "translation_vectors": tvecs
-    }
+    return gif_path
