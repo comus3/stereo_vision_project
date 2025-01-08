@@ -335,4 +335,83 @@ def pointToJson(point):
     with open('point.txt','+w') as file:
         json.dump(data,file)
 
+def calibrate(checkerboard_dims=(7, 7), images_path='./chessboards/*.png', display=True):
+    """
+    Calibrate the camera using chessboard images.
 
+    Parameters:
+        checkerboard_dims (tuple): Dimensions of the chessboard (rows, columns).
+        images_path (str): Glob pattern for chessboard images.
+        display (bool): Whether to display detected corners.
+
+    Returns:
+        dict: Calibration results including camera matrix, distortion coefficients,
+              rotation vectors, and translation vectors.
+    """
+    CHECKERBOARD = checkerboard_dims
+    criteria = (cv.TERM_CRITERIA_EPS + cv.TERM_CRITERIA_MAX_ITER, 30, 0.001)
+
+    objpoints = []
+    imgpoints = []
+
+    # Prepare a single object point grid for the checkerboard
+    objp = np.zeros((1, CHECKERBOARD[0] * CHECKERBOARD[1], 3), np.float32)
+    objp[0, :, :2] = np.mgrid[0:CHECKERBOARD[0], 0:CHECKERBOARD[1]].T.reshape(-1, 2)
+    if images_path == './chessboards/*.png':
+        images = glob.glob(images_path)
+    else:
+        images = images_path
+    for n, fname in enumerate(images):
+        img = cv.imread(fname)
+        if img is None:
+            print(f"Could not load image: {fname}")
+            continue
+
+        gray = cv.cvtColor(img, cv.COLOR_BGR2GRAY) if len(img.shape) == 3 else img
+
+        # Find the chessboard corners
+        ret, corners = cv.findChessboardCorners(
+            gray, CHECKERBOARD,
+            cv.CALIB_CB_ADAPTIVE_THRESH + cv.CALIB_CB_NORMALIZE_IMAGE
+        )
+        if ret:
+            objpoints.append(objp)
+            corners2 = cv.cornerSubPix(gray, corners, (11, 11), (-1, -1), criteria)
+            imgpoints.append(corners2)
+
+            # Draw and optionally display the corners
+            img = cv.drawChessboardCorners(img, CHECKERBOARD, corners2, ret)
+            if display:
+                scale_percent = 20  # Resize to 20% of the original size
+                width = int(img.shape[1] * scale_percent / 100)
+                height = int(img.shape[0] * scale_percent / 100)
+                dim = (width, height)
+                img_resized = cv.resize(img, dim, interpolation=cv.INTER_AREA)
+                cv.imshow('Detected Corners', img_resized)
+                cv.waitKey(0)
+        else:
+            print(f"No corners detected in image: {fname}")
+
+    cv.destroyAllWindows()
+
+    # Check if there are enough points for calibration
+    if not objpoints or not imgpoints:
+        print("No valid points were found for calibration. Exiting.")
+        return None
+
+    # Camera calibration
+    ret, mtx, dist, rvecs, tvecs = cv.calibrateCamera(objpoints, imgpoints, gray.shape[::-1], None, None)
+
+    # Display calibration results
+    print("Camera matrix : \n", mtx)
+    print("Distortion coefficients : \n", dist)
+    print("Rotation vectors : \n", rvecs)
+    print("Translation vectors : \n", tvecs)
+
+    return {
+        "ret": ret,
+        "camera_matrix": mtx,
+        "dist_coefficients": dist,
+        "rotation_vectors": rvecs,
+        "translation_vectors": tvecs
+    }
