@@ -271,7 +271,6 @@ def getObjectPoint(pointsRight,epl,camWorldCenterLeft,camWorldCenterRight,camLef
     point = [[],[],[]]
     for l in range(26):
         pointsLeft = np.array(epl[l][0])
-        
         pointRight = np.array(pointsRight[l])
         for i in range(len(pointsLeft[0])):
             try:
