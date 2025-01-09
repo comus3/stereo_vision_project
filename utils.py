@@ -1,3 +1,4 @@
+from tqdm import tqdm
 import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
@@ -11,6 +12,8 @@ from PIL import Image
 import os
 from IPython.display import Image as pythImage, display
 import imageio
+from scipy.spatial import Delaunay
+import os
 
 
 
@@ -287,7 +290,7 @@ def getObjectPoint(pointsRight,epl,camWorldCenterLeft,camWorldCenterRight,camLef
     return np.array(point)
         
 
-def drawPointObject(point, save_path=None):
+def drawPointObject(point, save_path=None,thickness=50):
     """
     Dessine un nuage de points 3D à partir des coordonnées données,
     avec une coloration basée sur la profondeur (coordonnée Z).
@@ -300,7 +303,7 @@ def drawPointObject(point, save_path=None):
     colors = plt.cm.jet((depth - np.min(depth)) / (np.max(depth) - np.min(depth)))  # Normalisation et application d'une colormap
 
     # Dessine les points en 3D
-    scatter = ax.scatter3D(point[0, :], point[1, :], point[2, :], s=50, c=colors, marker='o')
+    scatter = ax.scatter3D(point[0, :], point[1, :], point[2, :], s=thickness, c=colors, marker='o')
 
     # Ajuste l'angle de vue
     ax.view_init(elev=-90, azim=-70)
@@ -354,7 +357,7 @@ def rotatePoints(points, axis='z', angle_deg=180):
     # Appliquer la rotation à tous les points
     return np.dot(rotation_matrix, points)
 
-def createGifMonkey(points, num_frames=15, axis='z', angle_step=10, gif_path='rotation.gif'):
+def createGifMonkey(points, num_frames=15, axis='z', angle_step=10, gif_path='rotation.gif',point_thickness=50):
     """
     Crée un GIF montrant une rotation du nuage de points.
     """
@@ -362,7 +365,7 @@ def createGifMonkey(points, num_frames=15, axis='z', angle_step=10, gif_path='ro
     for i in range(num_frames):
         rotated_points = rotatePoints(points, axis=axis, angle_deg=i * angle_step)
         filename = f'frame_{i:02d}.png'
-        drawPointObject(rotated_points, save_path=filename)
+        drawPointObject(rotated_points, save_path=filename,thickness=point_thickness)
         filenames.append(filename)
 
     # Créer le GIF avec boucle infinie
@@ -376,3 +379,113 @@ def createGifMonkey(points, num_frames=15, axis='z', angle_step=10, gif_path='ro
         os.remove(filename)
 
     return gif_path
+
+
+def drawMeshObject(point, save_path=None):
+    """
+    Dessine une surface lisse approximée à partir d'un nuage de points 3D
+    avec une triangulation de Delaunay, et applique une coloration basée sur la profondeur.
+    """
+    figure = plt.figure()
+    ax = figure.add_subplot(111, projection='3d')  # Crée un axe 3D
+
+    # Triangulation des points avec Delaunay
+    tri = Delaunay(point[:2, :].T)  # Utilisation des 2 premières coordonnées pour la triangulation 2D
+
+    # Calcul de la profondeur pour la coloration
+    depth = point[2, :]  # Coordonnée Z des points
+    colors = plt.cm.jet((depth - np.min(depth)) / (np.max(depth) - np.min(depth)))  # Normalisation et application d'une colormap
+
+    # Dessine les triangles de la surface
+    for simplex in tqdm(tri.simplices, desc='Dessin des triangles', unit='triangle', colour='green'):
+        tri_points = point[:, simplex]
+        ax.plot_trisurf(tri_points[0], tri_points[1], tri_points[2], color=colors[simplex[0]], linewidth=0.5, edgecolor='k', alpha=0.6)
+
+    # Ajuste l'angle de vue
+    ax.view_init(elev=-90, azim=-70)
+
+    # Supprime les axes
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.set_zticks([])
+
+    if save_path is not None:
+        plt.savefig(save_path)
+        plt.close()
+    else:
+        plt.axis('off')
+        plt.show()
+
+def createMaskGifMonkey(points, num_frames=15, axis='z', angle_step=10, gif_path='mask_rotation.gif'):
+    """
+    Crée un GIF montrant une rotation d'une surface lisse approximée à partir du nuage de points.
+    """
+    
+    filenames = []
+    for i in tqdm(range(num_frames)):
+        rotated_points = rotatePoints(points, axis=axis, angle_deg=i * angle_step)
+        filename = f'frame_{i:02d}.png'
+        drawMeshObject(rotated_points, save_path=filename)
+        filenames.append(filename)
+
+    # Créer le GIF avec boucle infinie
+    with imageio.get_writer(gif_path, mode='I', duration=0.1, loop=0) as writer:
+        for filename in filenames:
+            image = imageio.imread(filename)
+            writer.append_data(image)
+
+    # Supprimer les images temporaires
+    for filename in filenames:
+        os.remove(filename)
+
+    return gif_path
+
+
+def getObjectPointCV(pointsRightInput, epl, camLeft, camRight):
+    """
+    Compute 3D points from a sequence of 2D points across 26 images.
+
+    Parameters:
+        pointsRightInput (list): List of 2D points in the right images (26 elements, each Nx2).
+        epl (list): List of 2D epipolar line points in the left images (26 elements, each Nx2).
+        camLeft (np.ndarray): 3x4 projection matrix of the left camera.
+        camRight (np.ndarray): 3x4 projection matrix of the right camera.
+
+    Returns:
+        np.ndarray: 3xN array of 3D points in Cartesian coordinates.
+    """
+    # Initialize lists for collecting 3D points
+    points_3D_list = [[], [], []]
+
+    # Iterate through all 26 scans
+    for l in range(26):
+        # Extract points for the left and right images (Nx2)
+        pointsLeft = np.array(epl[l]).T[:, :2]  # Ensure Nx2 shape
+        pointsRight = np.array(pointsRightInput[l]).T[:, :2]  # Ensure Nx2 shape
+
+        # If there are no points, skip this iteration
+        if pointsLeft.size == 0 or pointsRight.size == 0 or pointsLeft.shape[0] != pointsRight.shape[0]:
+            continue  # Skip if no points or mismatched number of points
+
+        # Triangulate 3D points
+        points_4D = cv.triangulatePoints(camLeft, camRight, pointsLeft.T, pointsRight.T)
+
+        # Normalize to Cartesian coordinates, avoiding division by zero
+        w = points_4D[3]
+        valid_mask = w != 0  # Mask out points with zero 'w' values
+        
+        if valid_mask.any():
+            # Normalize only valid points
+            points_3D = points_4D[:3, valid_mask] / w[valid_mask]  # Normalize
+
+            # Check for invalid points (NaN, Inf)
+            points_3D = np.nan_to_num(points_3D, nan=0.0, posinf=0.0, neginf=0.0)
+
+            # Append the valid 3D points to the main list
+            points_3D_list[0].extend(points_3D[0])
+            points_3D_list[1].extend(points_3D[1])
+            points_3D_list[2].extend(points_3D[2])
+
+    # Convert to a numpy array and return
+    points_3D_array = np.array(points_3D_list)
+    return points_3D_array
